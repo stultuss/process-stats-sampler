@@ -21,6 +21,14 @@ const {sample} = require('process-stats-sampler');
 await sample('/tmp/stats.json');
 ```
 
+## ESM
+
+The package ships both `require` and `import` entry points. They share the same module instance, so mixing both in one process is safe:
+
+```js
+import {sample, lag, reset} from 'process-stats-sampler';
+```
+
 ## Measuring delay
 
 ```js
@@ -94,6 +102,7 @@ Example output:
 - The `logger` / `onError` options were removed; runtime failures now reject the returned promise instead of logging and continuing.
 - `user` / `system` are numbers instead of fixed-point strings.
 - The default output path is `/tmp/stats.json` (was `/tmp/stats.log`).
+- A native ESM entry point (`import`) is now provided alongside `require`.
 
 ## Development
 
