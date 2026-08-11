@@ -1,5 +1,9 @@
 # process-stats-sampler
 
+[![NPM Version][npm-image]][npm-url]
+[![NPM Downloads][downloads-image]][downloads-url]
+[![CI][ci-image]][ci-url]
+
 从 Demo 项目的 `ShellTools.monitor` 抽出的进程采样逻辑，独立成库：把 Node.js 进程的内存与 CPU 使用情况写入 JSON 文件，并附带 Node 事件循环执行延迟测量。
 
 ## 安装
@@ -95,3 +99,13 @@ const delay = await lag(1000);
 npm run build   # 编译到 dist/
 npm test        # 构建 + 运行 node:test 测试
 ```
+## License
+
+[MIT](./LICENSE)
+
+[npm-image]: https://img.shields.io/npm/v/process-stats-sampler.svg
+[npm-url]: https://npmjs.org/package/process-stats-sampler
+[downloads-image]: https://img.shields.io/npm/dm/process-stats-sampler.svg
+[downloads-url]: https://npmjs.org/package/process-stats-sampler
+[ci-image]: https://github.com/stultuss/process-stats-sampler/actions/workflows/ci.yml/badge.svg
+[ci-url]: https://github.com/stultuss/process-stats-sampler/actions/workflows/ci.yml
