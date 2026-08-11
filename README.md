@@ -98,15 +98,6 @@ Example output:
 - File writes are atomic (temp file + `rename`), so the target file is never left truncated. A hard kill between the write and the rename may leave an orphan temp file.
 - The `lag` timer is not `unref()`ed, so a process with only a pending `lag` timer stays alive until it fires (this guarantees the promise always resolves).
 
-## Compatibility notes (1.1.0 vs 1.0.0)
-
-- `monitor()` was removed; use `sample()`.
-- The `interval` parameter was removed; the CPU rate uses the real elapsed time between calls instead.
-- The `logger` / `onError` options were removed; runtime failures now reject the returned promise instead of logging and continuing.
-- `user` / `system` are numbers instead of fixed-point strings.
-- The default output path is `/tmp/stats.json` (was `/tmp/stats.log`).
-- A native ESM entry point (`import`) is now provided alongside `require`.
-
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
