@@ -4,24 +4,24 @@
 [![NPM Downloads][downloads-image]][downloads-url]
 [![CI][ci-image]][ci-url]
 
-从 Demo 项目的 `ShellTools.monitor` 抽出的进程采样逻辑，独立成库：把 Node.js 进程的内存与 CPU 使用情况写入 JSON 文件，并附带 Node 事件循环执行延迟测量。
+Standalone library extracted from the `ShellTools.monitor` of a production demo. It periodically samples the Node.js process's memory and CPU usage into a JSON file and measures the Node event-loop execution delay.
 
-## 安装
+## Install
 
 ```bash
 npm install process-stats-sampler
 ```
 
-## 使用
+## Usage
 
 ```js
 const {ProcessStatsSampler} = require('process-stats-sampler');
 
-// 每 30 秒调用一次，采样结果写入 /tmp/stats.log
+// Call every 30 seconds; the sample is written to /tmp/stats.log
 await ProcessStatsSampler.monitor('/tmp/stats.log', 30);
 ```
 
-也可以使用便捷函数别名：
+You can also use the convenience function alias:
 
 ```js
 const {monitor} = require('process-stats-sampler');
@@ -29,48 +29,48 @@ const {monitor} = require('process-stats-sampler');
 await monitor('/tmp/stats.log', 30);
 ```
 
-## 延迟测量
+## Measuring delay
 
 ```js
 const {lag} = require('process-stats-sampler');
 
-// 等待 1000ms，返回实际延迟与预期时间的差值（毫秒，>= 0）
+// Waits 1000ms and returns the difference between the actual and expected time (ms, >= 0)
 const delay = await lag(1000);
 ```
 
-`lag(ms = 1000)` 用于检测 Node 事件循环的执行延迟：事件循环被同步任务阻塞时，定时器会晚触发，实际经过时间与预期时间的差值即为返回的 `delay`。
+`lag(ms = 1000)` measures the Node event-loop execution delay: when the event loop is blocked by synchronous work, timers fire late and the difference between the actual and expected elapsed time is the returned `delay`.
 
 ## API
 
 ### `monitor(filename?, interval?, options?)`
 
-| 参数 | 类型 | 默认值 | 说明 |
+| Param | Type | Default | Description |
 | --- | --- | --- | --- |
-| `filename` | `string` | `/tmp/stats.log` | 输出 JSON 文件路径，目录不存在时自动创建；写入采用临时文件 + 原子替换 |
-| `interval` | `number` | `30` | 采样间隔（秒），必须为正的有限数 |
-| `options.logger` | `{warn: (message: string) => void}` | `console` | 采样失败时记录警告；缺少 `warn` 时自动降级到 `console` |
-| `options.unit` | `'ratio' \| 'percent' \| 'machine-percent'` | `'ratio'` | CPU 输出单位 |
-| `options.lag` | `boolean \| number` | `true` | 是否记录 lag（事件循环延迟探测）：`true` 用 1ms 探测，`false` 不探测（字段写 0），数字为自定义探测毫秒数 |
+| `filename` | `string` | `/tmp/stats.log` | Output JSON file path; parent directories are created automatically. Writes use a temp file + atomic rename |
+| `interval` | `number` | `30` | Sampling interval in seconds; must be a positive finite number |
+| `options.logger` | `{warn: (message: string) => void}` | `console` | Logger for sampling warnings; falls back to `console` when `warn` is missing |
+| `options.unit` | `'ratio' \| 'percent' \| 'machine-percent'` | `'ratio'` | CPU output unit |
+| `options.lag` | `boolean \| number` | `true` | Record lag (event-loop delay probe): `true` probes with 1ms, `false` skips the probe (field is 0), a number sets a custom probe duration in ms |
 
-#### CPU 单位
+#### CPU units
 
-- `ratio`（默认）：CPU 微秒 / 墙钟毫秒，单核满载约为 1000（与 Demo 行为一致）
-- `percent`：单核百分比，单核满载为 100
-- `machine-percent`：整机百分比（单核百分比 ÷ CPU 核数）
+- `ratio` (default): CPU microseconds / wall-clock milliseconds; a fully utilized core is about 1000 (same as the original demo behavior)
+- `percent`: percent of one core; a fully utilized core is 100
+- `machine-percent`: percent of the whole machine (percent of one core ÷ number of cores)
 
-输出中的 `lag` 字段为事件循环执行延迟探测结果（与 `lag()` 同一语义）：每次采样等待一个短定时器，事件循环被同步任务阻塞时定时器晚触发，返回值即当前 Node 的执行延迟（毫秒，最小 0）。默认用 1ms 探测，可用 `options.lag` 关闭或自定义探测时长。
+The `lag` field in the output is the event-loop execution delay probe (same semantics as `lag()`): each sample waits on a short timer; when the event loop is blocked by synchronous work the timer fires late, so the value is the current Node execution delay in ms (min 0). By default it probes with 1ms; use `options.lag` to disable it or set a custom probe duration.
 
-参数错误（`filename` 为空、`interval` 非正数、`unit` 非法、`lag` 非法、`ms` 非法）会抛出 `TypeError` / `RangeError`；文件读写等运行时错误仅记录警告，不会向调用方抛错。
+Invalid arguments (`filename` empty, `interval` non-positive, invalid `unit`/`lag`, invalid `ms`) throw a `TypeError` / `RangeError`; runtime errors such as file I/O failures only log a warning and never reject the caller.
 
 ### `lag(ms?)`
 
-| 参数 | 类型 | 默认值 | 说明 |
+| Param | Type | Default | Description |
 | --- | --- | --- | --- |
-| `ms` | `number` | `1000` | 预期等待毫秒数，非负有限数，最大约 24.8 天 |
+| `ms` | `number` | `1000` | Expected wait time in ms; a non-negative finite number up to ~24.8 days |
 
-返回实际经过时间与 `ms` 的差值（毫秒，最小为 0）。
+Returns the difference between the actual elapsed time and `ms` (ms, min 0).
 
-输出内容示例：
+Example output:
 
 ```json
 {
@@ -85,23 +85,20 @@ const delay = await lag(1000);
 }
 ```
 
-## 行为说明
+## Behavior notes
 
-- CPU 速率取两次采样之间的差值除以 `interval * 1000`；首次调用以当前 `cpuUsage()` 为基线，因此首次采样接近 0。
-- `lag` 字段为事件循环执行延迟探测结果（见上文），可通过 `options.lag` 控制开关与探测时长。
-- 并发调用在库内串行执行，避免 CPU 基线与文件写入互相干扰。
-- 文件写入原子化（临时文件 + `rename`），进程中断不会留下截断的 JSON。
-- `lag` 的定时器不调用 `unref`，因此进程内若只有未完成的 `lag` 定时器，进程会等它触发后才退出（保证 Promise 必定 resolve）。
+- The CPU rate is the delta between two samples divided by `interval * 1000`; the first call uses the current `cpuUsage()` as the baseline, so the first sample is near 0.
+- The `lag` field is the event-loop execution delay probe (see above); controlled via `options.lag`.
+- Concurrent calls are serialized internally so CPU baselines and file writes never interfere with each other.
+- File writes are atomic (temp file + `rename`), so an interrupted process never leaves a truncated JSON file.
+- The `lag` timer is not `unref()`ed, so a process with only a pending `lag` timer stays alive until it fires (this guarantees the promise always resolves).
 
-## 开发
+## Development
 
 ```bash
-npm run build   # 编译到 dist/
-npm test        # 构建 + 运行 node:test 测试
+npm run build   # compile to dist/
+npm test        # build + run node:test tests
 ```
-## License
-
-[MIT](./LICENSE)
 
 [npm-image]: https://img.shields.io/npm/v/process-stats-sampler.svg
 [npm-url]: https://npmjs.org/package/process-stats-sampler
