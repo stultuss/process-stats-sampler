@@ -5,7 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This package is maintained primarily for personal use, so version numbers
 follow release cadence rather than strict semantic versioning.
 
-## [1.1.0] - 2026-08-11
+## [1.1.1] - 2026-08-11
 
 ### Added
 
