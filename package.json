@@ -1,0 +1,37 @@
+{
+  "name": "process-stats-sampler",
+  "version": "0.1.0",
+  "author": "stultuss",
+  "description": "Sample Node.js process memory and CPU usage to a JSON file",
+  "homepage": "https://github.com/stultuss/process-stats-sampler#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stultuss/process-stats-sampler.git"
+  },
+  "bugs": "https://github.com/stultuss//process-stats-sampler/issues",
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.js"
+  },
+  "keywords": [
+    "process",
+    "stats",
+    "memory",
+    "cpu",
+    "monitor",
+    "sampler"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.6.0"
+  }
+}
