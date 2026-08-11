@@ -20,8 +20,16 @@ npm install process-stats-sampler
 ```js
 const {sample} = require('process-stats-sampler');
 
-// Call every 30 seconds; the sample is written to /tmp/stats.json
-await sample('/tmp/stats.json');
+// Call every 30 seconds; the sample is written to /tmp/stats.json.
+// sample() rejects on runtime failures (e.g. disk full), so handle errors
+// instead of letting them become unhandled rejections.
+setInterval(async () => {
+    try {
+        await sample('/tmp/stats.json');
+    } catch (error) {
+        console.error('sampling failed:', error.message);
+    }
+}, 30_000);
 ```
 
 ## ESM
