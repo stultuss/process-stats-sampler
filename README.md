@@ -81,7 +81,8 @@ Example output:
   "arrayBuffers": 11358,
   "user": "0.25",
   "system": "0.06",
-  "lag": 0
+  "lag": 0,
+  "timestamp": 1786320000000
 }
 ```
 
@@ -89,6 +90,7 @@ Example output:
 
 - The CPU rate is the delta between two samples divided by `interval * 1000`; the first call uses the current `cpuUsage()` as the baseline, so the first sample is near 0.
 - The `lag` field is the event-loop execution delay probe (see above); controlled via `options.lag`.
+- The output includes a `timestamp` field (epoch milliseconds) so consumers know when the sample was taken.
 - Concurrent calls are serialized internally so CPU baselines and file writes never interfere with each other.
 - File writes are atomic (temp file + `rename`), so an interrupted process never leaves a truncated JSON file.
 - The `lag` timer is not `unref()`ed, so a process with only a pending `lag` timer stays alive until it fires (this guarantees the promise always resolves).

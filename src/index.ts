@@ -20,6 +20,8 @@ export interface ProcessStatsSample {
     user: string;
     system: string;
     lag: number;
+    /** Epoch milliseconds when the sample was taken */
+    timestamp: number;
 }
 
 export interface MonitorOptions {
@@ -175,6 +177,7 @@ export class ProcessStatsSampler {
                     user: formatCpu(curCPU.user - preCPU.user, ms, unit),
                     system: formatCpu(curCPU.system - preCPU.system, ms, unit),
                     lag: lagValue,
+                    timestamp: Date.now(),
                 };
 
                 await atomicWrite(filename, JSON.stringify(stats));

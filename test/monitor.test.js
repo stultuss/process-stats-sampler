@@ -29,6 +29,8 @@ test('monitor writes memory and CPU fields', async () => {
     assert.equal(typeof stats.system, 'string');
     assert.equal(typeof stats.lag, 'number');
     assert.ok(stats.lag >= 0, 'lag is a non-negative number');
+    assert.equal(typeof stats.timestamp, 'number');
+    assert.ok(stats.timestamp > 0, 'timestamp is a positive epoch ms value');
 
     await fsp.unlink(monitorFile).catch(() => undefined);
 });
