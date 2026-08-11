@@ -28,7 +28,12 @@
   },
   "sideEffects": false,
   "files": [
-    "dist"
+    "dist/index.js",
+    "dist/index.mjs",
+    "dist/index.d.ts",
+    "dist/index.d.mts",
+    "dist/index.js.map",
+    "dist/index.d.ts.map"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-esm.mjs",
