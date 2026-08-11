@@ -9,54 +9,6 @@ const MAX_TIMER_DELAY = 2_147_483_647;
 /** Default lag probe wait in ms */
 const DEFAULT_LAG_PROBE_MS = 1;
 
-/**
- * Number of CPU cores available to the process.
- *
- * On Linux this reads the cgroup CPU quota first, so containerized
- * deployments report the allowed core count instead of the host's.
- */
-const CPU_COUNT = getCpuCount();
-
-/** Read a cgroup v2 "quota period" limit; returns undefined when unreadable or unlimited. */
-function readCgroupLimit(file: string): number | undefined {
-    try {
-        const parts = fs.readFileSync(file, 'utf8').trim().split(/\s+/);
-        const quota = Number(parts[0]);
-        const period = Number(parts[1]);
-        if (quota > 0 && period > 0) {
-            return Math.max(1, Math.round(quota / period));
-        }
-    } catch {
-        // file missing or unreadable; no cgroup limit visible
-    }
-    return undefined;
-}
-
-function getCpuCount(): number {
-    const hostCores = os.cpus().length;
-    if (process.platform !== 'linux') {
-        return hostCores;
-    }
-    // cgroup v2: /sys/fs/cgroup/cpu.max contains "quota period" (quota may be "max")
-    const v2 = readCgroupLimit('/sys/fs/cgroup/cpu.max');
-    if (v2 !== undefined) {
-        return v2;
-    }
-    // cgroup v1: quota and period live in separate files
-    try {
-        const quota = Number(fs.readFileSync('/sys/fs/cgroup/cpu/cpu.cfs_quota_us', 'utf8').trim());
-        if (quota > 0) {
-            const period = Number(fs.readFileSync('/sys/fs/cgroup/cpu/cpu.cfs_period_us', 'utf8').trim());
-            if (period > 0) {
-                return Math.max(1, Math.round(quota / period));
-            }
-        }
-    } catch {
-        // no cgroup limits; use host cores
-    }
-    return hostCores;
-}
-
 export type CpuUnit = 'ratio' | 'percent' | 'machine-percent';
 
 export interface ProcessStatsSample {
@@ -65,7 +17,7 @@ export interface ProcessStatsSample {
     heapUsed: number;
     external: number;
     arrayBuffers: number;
-    /** CPU microseconds per actual wall-clock millisecond between samples; ~1000 for a fully utilized core */
+    /** CPU microseconds per actual wall-clock millisecond between samples (~1000 for a fully utilized core), rounded to 3 decimals */
     user: number;
     system: number;
     /** Event-loop execution delay probe in ms (0 when disabled) */
@@ -74,22 +26,12 @@ export interface ProcessStatsSample {
     timestamp: number;
 }
 
-export interface MonitorOptions {
-    /**
-     * Logger used to report sampling warnings.
-     * Falls back to console.warn when missing or without a warn method.
-     */
-    logger?: {warn: (message: string) => void};
-    /**
-     * Called with runtime sampling errors (e.g. file I/O failures).
-     * Without it, errors are only logged via `logger`; the promise never rejects.
-     */
-    onError?: (error: Error) => void;
+export interface SampleOptions {
     /**
      * CPU output unit:
      * - ratio (default): CPU microseconds / wall-clock milliseconds, ~1000 for a fully utilized core
      * - percent: percent of one core, a fully utilized core is 100
-     * - machine-percent: percent of the whole machine (percent of one core / number of cores available to the process)
+     * - machine-percent: percent of the whole machine (percent of one core / cores available to the process)
      */
     unit?: CpuUnit;
     /**
@@ -103,8 +45,8 @@ export interface MonitorOptions {
 
 /**
  * Per-file sampling state. Independent files keep their own CPU baseline and
- * serialization queue, so sampling several targets in one process never pollutes
- * each other's CPU deltas.
+ * serialization queue. State for a file is retained until `reset(filename)` is
+ * called, so callers using dynamic filenames should reset them when done.
  */
 interface StreamState {
     queue: Promise<void>;
@@ -124,16 +66,78 @@ function getStream(filename: string): StreamState {
     return state;
 }
 
-function assertArgs(filename: string, interval: number, unit: CpuUnit): void {
-    if (typeof filename !== 'string' || filename.trim().length === 0) {
-        throw new TypeError(`filename must be a non-empty string, got ${JSON.stringify(filename)}`);
+/** Count CPUs listed in a cpuset value like "0-3,5" or "0,2". */
+function countCpuset(cpus: string): number | undefined {
+    if (cpus.length === 0) {
+        return undefined;
     }
-    if (typeof interval !== 'number' || !Number.isFinite(interval) || interval <= 0) {
-        throw new TypeError(`interval must be a positive finite number (seconds), got ${interval}`);
+    let count = 0;
+    for (const part of cpus.split(',')) {
+        const [startStr, endStr] = part.split('-');
+        const start = Number(startStr);
+        const end = endStr === undefined ? start : Number(endStr);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+            return undefined;
+        }
+        count += end - start + 1;
     }
-    if (unit !== 'ratio' && unit !== 'percent' && unit !== 'machine-percent') {
-        throw new TypeError(`unit must be 'ratio' | 'percent' | 'machine-percent', got ${JSON.stringify(unit)}`);
+    return count;
+}
+
+/**
+ * Number of CPU cores effectively available to the process.
+ *
+ * On Linux this reads the cgroup CPU quota (v2 cpu.max / v1 cfs quota) and the
+ * cpuset, and returns the binding constraint. Fractional quotas (e.g. 0.5 core
+ * in Kubernetes) are preserved instead of being rounded away. Re-read on every
+ * call so runtime changes (docker update, HPA) are picked up.
+ */
+function getCpuCount(): number {
+    const hostCores = os.cpus().length;
+    if (process.platform !== 'linux') {
+        return hostCores;
     }
+
+    let quotaCores: number | undefined;
+    try {
+        // cgroup v2: /sys/fs/cgroup/cpu.max contains "quota period" (quota may be "max")
+        const [quotaStr, periodStr] = fs.readFileSync('/sys/fs/cgroup/cpu.max', 'utf8').trim().split(/\s+/);
+        const quota = Number(quotaStr);
+        const period = Number(periodStr);
+        if (quota > 0 && period > 0) {
+            quotaCores = quota / period;
+        }
+    } catch {
+        // not cgroup v2; try v1 below
+    }
+    if (quotaCores === undefined) {
+        try {
+            const quota = Number(fs.readFileSync('/sys/fs/cgroup/cpu/cpu.cfs_quota_us', 'utf8').trim());
+            if (quota > 0) {
+                const period = Number(fs.readFileSync('/sys/fs/cgroup/cpu/cpu.cfs_period_us', 'utf8').trim());
+                if (period > 0) {
+                    quotaCores = quota / period;
+                }
+            }
+        } catch {
+            // no quota; fall through to cpuset
+        }
+    }
+
+    let cpusetCores: number | undefined;
+    for (const file of ['/sys/fs/cgroup/cpuset.cpus.effective', '/sys/fs/cgroup/cpuset/cpuset.cpus']) {
+        try {
+            cpusetCores = countCpuset(fs.readFileSync(file, 'utf8').trim());
+            if (cpusetCores !== undefined) {
+                break;
+            }
+        } catch {
+            // try the next cpuset file
+        }
+    }
+
+    const limits = [quotaCores, cpusetCores, hostCores].filter((n): n is number => n !== undefined && n > 0);
+    return limits.length > 0 ? Math.min(...limits) : hostCores;
 }
 
 /** Normalize the lag option to a probe duration in ms: false -> 0 (no probe), true -> default */
@@ -153,19 +157,20 @@ function normalizeLagOption(lag: boolean | number): number {
 /**
  * CPU rate: delta of process.cpuUsage() (microseconds) divided by the actual
  * wall-clock time between consecutive samples of the same file (milliseconds).
+ * Output is a JSON number rounded to 3 decimals.
  */
 function formatCpu(deltaUs: number, elapsedMs: number, unit: CpuUnit): number {
     if (elapsedMs <= 0) {
         return 0;
     }
     const ratio = deltaUs / elapsedMs;
+    let value = ratio;
     if (unit === 'percent') {
-        return ratio / 10;
+        value = ratio / 10;
+    } else if (unit === 'machine-percent') {
+        value = ratio / 10 / getCpuCount();
     }
-    if (unit === 'machine-percent') {
-        return ratio / 10 / CPU_COUNT;
-    }
-    return ratio;
+    return Number(value.toFixed(3));
 }
 
 /**
@@ -222,87 +227,76 @@ export class ProcessStatsSampler {
      *
      * This is a one-shot sample; the caller decides when to call it (e.g. on a timer).
      * The CPU rate uses the actual wall-clock time between consecutive samples of the
-     * same file, so an irregular call cadence does not distort the reading.
+     * same file, so an irregular call cadence does not distort the reading. Memory,
+     * CPU and the timestamp are all captured at the start of the sample, before the
+     * lag probe.
      *
-     * @param {string} filename - output file path, defaults to /tmp/stats.log
-     * @param {number} interval - kept for backward compatibility and validation; the CPU
-     *                            rate is computed from real elapsed time, not this value
-     * @param {MonitorOptions} options - optional configuration
-     * @returns {Promise<void>}
-     * @throws {TypeError} when filename is empty, interval is not positive, or unit/lag is invalid
-     * @throws {RangeError} when interval or lag values are too large
+     * @param {string} filename - output file path, defaults to /tmp/stats.json
+     * @param {SampleOptions} options - optional configuration
+     * @returns {Promise<void>} resolves when the sample is written; rejects with the
+     *                          underlying Error on runtime failures (e.g. file I/O)
+     * @throws {TypeError} when filename is empty or unit/lag is invalid
+     * @throws {RangeError} when lag is too large
      */
-    public static async sample(filename: string = '/tmp/stats.log', interval: number = 30, options: MonitorOptions = {}): Promise<void> {
+    public static async sample(filename: string = '/tmp/stats.json', options: SampleOptions = {}): Promise<void> {
         const opts = options ?? {};
         const unit = opts.unit ?? 'ratio';
-        assertArgs(filename, interval, unit);
-
-        const ms = interval * 1000;
-        if (!Number.isFinite(ms)) {
-            throw new RangeError(`interval is too large, got ${interval}`);
+        if (typeof filename !== 'string' || filename.trim().length === 0) {
+            throw new TypeError(`filename must be a non-empty string, got ${JSON.stringify(filename)}`);
+        }
+        if (unit !== 'ratio' && unit !== 'percent' && unit !== 'machine-percent') {
+            throw new TypeError(`unit must be 'ratio' | 'percent' | 'machine-percent', got ${JSON.stringify(unit)}`);
         }
 
         const probeMs = normalizeLagOption(opts.lag ?? true);
-        const loggerWarn = opts.logger?.warn;
-        const warn = typeof loggerWarn === 'function' ? loggerWarn : console.warn;
-        const onError = typeof opts.onError === 'function' ? opts.onError : undefined;
-
         const stream = getStream(filename);
 
-        const run = async () => {
-            try {
-                const now = performance.now();
-                const timestamp = Date.now();
-                const preCPU = stream.lastCpuUsage ?? process.cpuUsage();
-                const curCPU = process.cpuUsage();
-                stream.lastCpuUsage = curCPU;
-                const elapsedMs = stream.lastSampleTime === undefined ? 0 : now - stream.lastSampleTime;
-                stream.lastSampleTime = now;
+        const task = stream.queue.then(async () => {
+            const now = performance.now();
+            const timestamp = Date.now();
+            const memory = process.memoryUsage();
+            const preCPU = stream.lastCpuUsage ?? process.cpuUsage();
+            const curCPU = process.cpuUsage();
+            stream.lastCpuUsage = curCPU;
+            const elapsedMs = stream.lastSampleTime === undefined ? 0 : now - stream.lastSampleTime;
+            stream.lastSampleTime = now;
 
-                const lagValue = probeMs > 0 ? await ProcessStatsSampler.lag(probeMs) : 0;
-                const stats: ProcessStatsSample = {
-                    ...process.memoryUsage(),
-                    user: formatCpu(curCPU.user - preCPU.user, elapsedMs, unit),
-                    system: formatCpu(curCPU.system - preCPU.system, elapsedMs, unit),
-                    lag: lagValue,
-                    timestamp,
-                };
+            const lagValue = probeMs > 0 ? await ProcessStatsSampler.lag(probeMs) : 0;
+            const stats: ProcessStatsSample = {
+                ...memory,
+                user: formatCpu(curCPU.user - preCPU.user, elapsedMs, unit),
+                system: formatCpu(curCPU.system - preCPU.system, elapsedMs, unit),
+                lag: lagValue,
+                timestamp,
+            };
 
-                await atomicWrite(filename, JSON.stringify(stats));
-            } catch (e) {
-                const error = e instanceof Error ? e : new Error(String(e));
-                warn(error.message);
-                onError?.(error);
-            }
-        };
+            await atomicWrite(filename, JSON.stringify(stats));
+        });
 
-        const task = stream.queue.then(run);
         stream.queue = task.catch(() => undefined);
         return task;
     }
 
     /**
-     * @deprecated Use {@link ProcessStatsSampler.sample} instead. Kept as an alias for
-     *             backward compatibility with v1.0.0.
+     * Clears the sampling state (CPU baseline and serialization queue) for a file.
+     * The next sample for that file starts a fresh baseline.
+     *
+     * @param {string} filename - output file path whose state should be cleared
      */
-    public static async monitor(filename: string = '/tmp/stats.log', interval: number = 30, options: MonitorOptions = {}): Promise<void> {
-        return ProcessStatsSampler.sample(filename, interval, options);
+    public static reset(filename: string): void {
+        streams.delete(path.resolve(filename));
     }
 }
 
 /**
- * Convenience function alias with the same signature as ShellTools.monitor:
- * monitor('/tmp/stats.log', 30)
- *
- * @deprecated Use `sample` instead.
- */
-export const monitor = ProcessStatsSampler.monitor;
-
-/**
- * One-shot sample; preferred over `monitor`:
- * sample('/tmp/stats.log', 30)
+ * One-shot sample: sample('/tmp/stats.json', {unit: 'percent'})
  */
 export const sample = ProcessStatsSampler.sample;
+
+/**
+ * Clears per-file sampling state: reset('/tmp/stats.json')
+ */
+export const reset = ProcessStatsSampler.reset;
 
 /**
  * Convenience function alias with the same signature as ShellTools.lag:
