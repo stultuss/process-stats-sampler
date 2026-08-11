@@ -4,7 +4,7 @@
 [![NPM Downloads][downloads-image]][downloads-url]
 [![CI][ci-image]][ci-url]
 
-Standalone library extracted from the `ShellTools.monitor` of a production demo. It periodically samples the Node.js process's memory and CPU usage into a JSON file and measures the Node event-loop execution delay.
+It periodically samples the Node.js process's memory and CPU usage into a JSON file and measures the Node event-loop execution delay.
 
 ## Install
 
