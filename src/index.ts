@@ -9,6 +9,9 @@ const MAX_TIMER_DELAY = 2_147_483_647;
 /** Default lag probe wait in ms */
 const DEFAULT_LAG_PROBE_MS = 1;
 
+/** Number of CPU cores (static per boot, safe to cache) */
+const CPU_COUNT = os.cpus().length;
+
 export type CpuUnit = 'ratio' | 'percent' | 'machine-percent';
 
 export interface ProcessStatsSample {
@@ -87,7 +90,7 @@ function formatCpu(deltaUs: number, ms: number, unit: CpuUnit): string {
     if (unit === 'percent') {
         value = ratio / 10;
     } else if (unit === 'machine-percent') {
-        value = ratio / 10 / os.cpus().length;
+        value = ratio / 10 / CPU_COUNT;
     }
     return value.toFixed(2);
 }
