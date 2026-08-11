@@ -7,13 +7,13 @@ const path = require('node:path');
 const fsp = require('node:fs/promises');
 const {ProcessStatsSampler} = require('../dist/index.js');
 
-/** 同步忙等，强制占用 CPU 阻塞事件循环 */
+/** Synchronous busy wait that occupies CPU and blocks the event loop */
 function busyWait(ms) {
     const end = Date.now() + ms;
     while (Date.now() < end) { /* block */ }
 }
 
-test('monitor 输出包含内存与 CPU 字段', async () => {
+test('monitor writes memory and CPU fields', async () => {
     const monitorFile = path.join(os.tmpdir(), `process-stats-sampler-${Date.now()}.json`);
 
     await ProcessStatsSampler.monitor(monitorFile, 0.001);
@@ -28,12 +28,12 @@ test('monitor 输出包含内存与 CPU 字段', async () => {
     assert.equal(typeof stats.user, 'string');
     assert.equal(typeof stats.system, 'string');
     assert.equal(typeof stats.lag, 'number');
-    assert.ok(stats.lag >= 0, 'lag 为非负数值');
+    assert.ok(stats.lag >= 0, 'lag is a non-negative number');
 
     await fsp.unlink(monitorFile).catch(() => undefined);
 });
 
-test('monitor lag: false 时 lag 字段为 0 且不探测', async () => {
+test('monitor lag: false writes lag as 0 and skips the probe', async () => {
     const monitorFile = path.join(os.tmpdir(), `process-stats-sampler-nolag-${Date.now()}.json`);
 
     await ProcessStatsSampler.monitor(monitorFile, 0.001, {lag: false});
@@ -43,32 +43,32 @@ test('monitor lag: false 时 lag 字段为 0 且不探测', async () => {
     await fsp.unlink(monitorFile).catch(() => undefined);
 });
 
-test('monitor 支持数字自定义 lag 探测时长', async () => {
+test('monitor supports a numeric custom lag probe duration', async () => {
     const monitorFile = path.join(os.tmpdir(), `process-stats-sampler-lag10-${Date.now()}.json`);
 
     await ProcessStatsSampler.monitor(monitorFile, 0.001, {lag: 10});
 
     const stats = JSON.parse(await fsp.readFile(monitorFile, 'utf8'));
     assert.equal(typeof stats.lag, 'number');
-    assert.ok(stats.lag >= 0 && stats.lag < 10, '10ms 探测的漂移应小于 10ms');
+    assert.ok(stats.lag >= 0 && stats.lag < 10, 'drift of a 10ms probe is below 10ms');
     await fsp.unlink(monitorFile).catch(() => undefined);
 });
 
-test('monitor 在事件循环被强制占用 CPU 时记录显著 lag', async () => {
+test('monitor records significant lag while the event loop is blocked by CPU-bound work', async () => {
     const monitorFile = path.join(os.tmpdir(), `process-stats-sampler-busy-${Date.now()}.json`);
 
-    // 让 monitor 先调度探测定时器，再同步阻塞事件循环 100ms
+    // Let monitor schedule its probe timer first, then block the event loop for 100ms
     const pending = ProcessStatsSampler.monitor(monitorFile, 0.001, {lag: 10});
     await new Promise((resolve) => setImmediate(resolve));
     busyWait(100);
     await pending;
 
     const stats = JSON.parse(await fsp.readFile(monitorFile, 'utf8'));
-    assert.ok(stats.lag >= 50, `阻塞 100ms 后 monitor 记录的 lag 应显著上升, 实际 ${stats.lag}`);
+    assert.ok(stats.lag >= 50, `lag recorded by monitor should rise after a 100ms block, got ${stats.lag}`);
     await fsp.unlink(monitorFile).catch(() => undefined);
 });
 
-test('monitor 自动创建不存在的目录', async () => {
+test('monitor creates missing directories', async () => {
     const dir = path.join(os.tmpdir(), `process-stats-sampler-dir-${Date.now()}`);
     const monitorFile = path.join(dir, 'nested', 'stats.json');
 
@@ -80,44 +80,44 @@ test('monitor 自动创建不存在的目录', async () => {
     await fsp.rm(dir, {recursive: true, force: true});
 });
 
-test('monitor 写入失败时记录警告而不是抛错', async () => {
+test('monitor logs a warning instead of throwing on write failure', async () => {
     const warnings = [];
     const logger = {warn: (message) => warnings.push(message)};
 
-    // 指向一个不可写的路径（根目录下无权限创建）
+    // Point at a path that cannot be created (no permission at the filesystem root)
     await ProcessStatsSampler.monitor('/nonexistent-root-dir/stats.json', 0.001, {logger});
 
-    assert.ok(warnings.length > 0, '应记录警告信息');
+    assert.ok(warnings.length > 0, 'a warning should be recorded');
 });
 
-test('lag 返回的延迟差不为负且实际等待达到指定毫秒数', async () => {
+test('lag returns a non-negative delay and waits the requested time', async () => {
     const lagStart = Date.now();
     const delay = await ProcessStatsSampler.lag(50);
-    assert.ok(delay >= 0, '延迟差不为负');
-    assert.ok(Date.now() - lagStart >= 45, '实际等待达到指定毫秒数（容忍时钟取整）');
+    assert.ok(delay >= 0, 'delay is never negative');
+    assert.ok(Date.now() - lagStart >= 45, 'wait reaches the requested ms (tolerating clock rounding)');
 });
 
-test('lag 默认等待 1000ms 且返回小延迟', async () => {
+test('lag defaults to 1000ms and returns a small delay', async () => {
     const lagStart = Date.now();
     const delay = await ProcessStatsSampler.lag();
-    assert.ok(Date.now() - lagStart >= 995, '默认等待约 1000ms');
-    assert.ok(delay >= 0 && delay < 500, '默认场景延迟差为小数值');
+    assert.ok(Date.now() - lagStart >= 995, 'default wait is about 1000ms');
+    assert.ok(delay >= 0 && delay < 500, 'default-scenario delay is a small value');
 });
 
-test('lag 在事件循环被强制占用 CPU 时显著上升', async () => {
-    // 对照组：空闲时延迟很小
+test('lag rises significantly while the event loop is blocked by CPU-bound work', async () => {
+    // Control: idle lag is small
     const idle = await ProcessStatsSampler.lag(1);
-    assert.ok(idle < 25, `空闲时 lag 应很小, 实际 ${idle}`);
+    assert.ok(idle < 25, `idle lag should be small, got ${idle}`);
 
-    // 实验组：先调度 1ms 探测定时器，再同步阻塞事件循环 80ms
+    // Experiment: schedule a 1ms probe timer, then block the event loop for 80ms
     const pending = ProcessStatsSampler.lag(1);
     busyWait(80);
     const busy = await pending;
-    assert.ok(busy >= 50, `阻塞 80ms 后 lag 应显著上升, 实际 ${busy}`);
-    assert.ok(busy > idle + 40, `阻塞后 lag 应远大于空闲时, idle=${idle}, busy=${busy}`);
+    assert.ok(busy >= 50, `lag should rise significantly after an 80ms block, got ${busy}`);
+    assert.ok(busy > idle + 40, `busy lag should far exceed idle lag, idle=${idle}, busy=${busy}`);
 });
 
-test('monitor 拒绝非法参数', async () => {
+test('monitor rejects invalid arguments', async () => {
     await assert.rejects(() => ProcessStatsSampler.monitor('/tmp/x.json', 0), TypeError);
     await assert.rejects(() => ProcessStatsSampler.monitor('/tmp/x.json', -5), TypeError);
     await assert.rejects(() => ProcessStatsSampler.monitor('/tmp/x.json', NaN), TypeError);
@@ -131,19 +131,19 @@ test('monitor 拒绝非法参数', async () => {
     await assert.rejects(() => ProcessStatsSampler.monitor('/tmp/x.json', 30, {lag: 'x'}), TypeError);
 });
 
-test('monitor 支持 percent 与 machine-percent 单位且输出有限数值', async () => {
+test('monitor supports percent and machine-percent units with finite output', async () => {
     for (const unit of ['percent', 'machine-percent']) {
         const monitorFile = path.join(os.tmpdir(), `process-stats-sampler-${unit}-${Date.now()}.json`);
         await ProcessStatsSampler.monitor(monitorFile, 0.001, {unit});
         const stats = JSON.parse(await fsp.readFile(monitorFile, 'utf8'));
-        assert.match(stats.user, /^-?\d+\.\d{2}$/, `${unit} user 为两位小数`);
-        assert.ok(Number.isFinite(Number(stats.user)), `${unit} user 为有限数值`);
-        assert.ok(Number.isFinite(Number(stats.system)), `${unit} system 为有限数值`);
+        assert.match(stats.user, /^-?\d+\.\d{2}$/, `${unit} user is a two-decimal string`);
+        assert.ok(Number.isFinite(Number(stats.user)), `${unit} user is a finite value`);
+        assert.ok(Number.isFinite(Number(stats.system)), `${unit} system is a finite value`);
         await fsp.unlink(monitorFile).catch(() => undefined);
     }
 });
 
-test('monitor 并发调用串行化且不产生 tmp 残留', async () => {
+test('monitor serializes concurrent calls and leaves no tmp files', async () => {
     const dir = path.join(os.tmpdir(), `process-stats-sampler-conc-${Date.now()}`);
     const f1 = path.join(dir, 'a.json');
     const f2 = path.join(dir, 'b.json');
@@ -163,17 +163,17 @@ test('monitor 并发调用串行化且不产生 tmp 残留', async () => {
     await fsp.rm(dir, {recursive: true, force: true});
 });
 
-test('logger 缺少 warn 时降级到 console 而不抛错', async () => {
+test('logger without warn falls back to console without throwing', async () => {
     await assert.doesNotReject(() => ProcessStatsSampler.monitor('/nonexistent-root-dir/x.json', 0.001, {logger: {}}));
 });
 
-test('lag 拒绝非法 ms', async () => {
+test('lag rejects invalid ms', async () => {
     await assert.rejects(() => ProcessStatsSampler.lag(-1), TypeError);
     await assert.rejects(() => ProcessStatsSampler.lag(NaN), TypeError);
     await assert.rejects(() => ProcessStatsSampler.lag(2 ** 31), RangeError);
 });
 
-test('lag(0) 立即返回约 0', async () => {
+test('lag(0) resolves to about 0', async () => {
     const delay = await ProcessStatsSampler.lag(0);
     assert.ok(delay >= 0 && delay < 100);
 });

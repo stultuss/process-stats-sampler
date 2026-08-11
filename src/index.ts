@@ -3,10 +3,10 @@ import path from 'node:path';
 import * as os from 'node:os';
 import {performance} from 'node:perf_hooks';
 
-/** Node 定时器允许的最大延迟（约 24.8 天），超过后 setTimeout 会立即触发 */
+/** Maximum delay allowed by Node timers (~24.8 days); beyond this setTimeout fires immediately */
 const MAX_TIMER_DELAY = 2_147_483_647;
 
-/** 默认 lag 探测等待毫秒数 */
+/** Default lag probe wait in ms */
 const DEFAULT_LAG_PROBE_MS = 1;
 
 export type CpuUnit = 'ratio' | 'percent' | 'machine-percent';
@@ -24,33 +24,33 @@ export interface ProcessStatsSample {
 
 export interface MonitorOptions {
     /**
-     * 采样失败时用于记录警告信息的 logger；
-     * 未提供或缺少 warn 方法时自动降级到 console.warn
+     * Logger used to report sampling warnings.
+     * Falls back to console.warn when missing or without a warn method.
      */
     logger?: {warn: (message: string) => void};
     /**
-     * CPU 输出单位：
-     * - ratio（默认）: CPU 微秒 / 墙钟毫秒，单核满载约为 1000（与 Demo 行为一致）
-     * - percent: 单核百分比，单核满载为 100
-     * - machine-percent: 整机百分比（单核百分比 ÷ CPU 核数）
+     * CPU output unit:
+     * - ratio (default): CPU microseconds / wall-clock milliseconds, a fully utilized core is about 1000
+     * - percent: percent of one core, a fully utilized core is 100
+     * - machine-percent: percent of the whole machine (percent of one core / number of cores)
      */
     unit?: CpuUnit;
     /**
-     * 是否在采样输出中记录 lag（事件循环延迟探测，与 lag() 同一语义）：
-     * - true（默认）: 以 1ms 定时器探测事件循环执行延迟
-     * - false: 不探测，lag 字段写 0
-     * - number: 自定义探测等待毫秒数（正的有限数，最大约 24.8 天）
+     * Whether to record lag in the sample (event-loop delay probe, same semantics as lag()):
+     * - true (default): probe event-loop execution delay with a 1ms timer
+     * - false: skip the probe, the lag field is 0
+     * - number: custom probe wait in ms (a positive finite number, up to ~24.8 days)
      */
     lag?: boolean | number;
 }
 
 /**
- * 上次采样时的 CPU 用量，作为本次差值的基线。
- * 首次调用时基线取当前 cpuUsage()，因此首次采样的 CPU 速率接近 0。
+ * CPU usage at the previous sample, used as the baseline for the delta.
+ * On the first call the baseline is the current cpuUsage(), so the first sample's CPU rate is near 0.
  */
 let lastCpuUsage: NodeJS.CpuUsage | undefined;
 
-/** 串行化采样队列，避免并发调用互相污染 CPU 基线与文件写入 */
+/** Serialized sampling queue so concurrent calls never pollute CPU baselines or file writes */
 let queue: Promise<void> = Promise.resolve();
 
 function assertMonitorArgs(filename: string, interval: number, unit: CpuUnit): void {
@@ -65,7 +65,7 @@ function assertMonitorArgs(filename: string, interval: number, unit: CpuUnit): v
     }
 }
 
-/** 将 lag 选项归一化为探测毫秒数：false 为 0（不探测），true 为默认值 */
+/** Normalize the lag option to a probe duration in ms: false -> 0 (no probe), true -> default */
 function normalizeLagOption(lag: boolean | number): number {
     if (typeof lag === 'boolean') {
         return lag ? DEFAULT_LAG_PROBE_MS : 0;
@@ -91,7 +91,8 @@ function formatCpu(deltaUs: number, ms: number, unit: CpuUnit): string {
 }
 
 /**
- * 原子写入：先写临时文件再 rename，进程中断时不会留下截断的目标文件。
+ * Atomic write: write to a temp file then rename, so an interrupted process
+ * never leaves a truncated target file.
  */
 async function atomicWrite(filename: string, data: string): Promise<void> {
     const dir = path.dirname(filename);
@@ -111,15 +112,16 @@ async function atomicWrite(filename: string, data: string): Promise<void> {
 export class ProcessStatsSampler {
 
     /**
-     * 延迟测量：等待指定毫秒数，返回实际经过时间与预期时间的差值
+     * Delay measurement: waits for the given milliseconds and returns the difference
+     * between the actual and expected elapsed time.
      *
-     * 用于检测 Node 事件循环的执行延迟：事件循环被同步任务阻塞时，
-     * 定时器会晚触发，返回值即阻塞导致的延迟（毫秒）。
+     * Measures the Node event-loop execution delay: when the event loop is blocked
+     * by synchronous work, timers fire late and the return value is the delay (ms).
      *
-     * @param {number} ms - 预期的延迟时间，默认为 1000 毫秒
-     * @returns {Promise<number>} 实际延迟与预期延迟的差值（毫秒，>= 0）
-     * @throws {TypeError} ms 不是非负有限数时
-     * @throws {RangeError} ms 超过 Node 定时器上限（约 24.8 天）时
+     * @param {number} ms - expected wait time, defaults to 1000 ms
+     * @returns {Promise<number>} difference between actual and expected delay (ms, >= 0)
+     * @throws {TypeError} when ms is not a non-negative finite number
+     * @throws {RangeError} when ms exceeds the Node timer limit (~24.8 days)
      */
     public static async lag(ms: number = 1000): Promise<number> {
         if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) {
@@ -138,14 +140,14 @@ export class ProcessStatsSampler {
     }
 
     /**
-     * 采样 Node.js 进程内存与 CPU 使用情况，以 JSON 形式写入文件
+     * Samples the Node.js process memory and CPU usage and writes it to a file as JSON.
      *
-     * @param {string} filename - 输出文件路径，默认 /tmp/stats.log
-     * @param {number} interval - 采样间隔（秒），用于计算 CPU 速率，默认 30
-     * @param {MonitorOptions} options - 可选配置
+     * @param {string} filename - output file path, defaults to /tmp/stats.log
+     * @param {number} interval - sampling interval in seconds used to compute the CPU rate, defaults to 30
+     * @param {MonitorOptions} options - optional configuration
      * @returns {Promise<void>}
-     * @throws {TypeError} filename 为空、interval 非正数、unit 或 lag 非法时
-     * @throws {RangeError} interval 或 lag 数值过大时
+     * @throws {TypeError} when filename is empty, interval is not positive, or unit/lag is invalid
+     * @throws {RangeError} when interval or lag values are too large
      */
     public static async monitor(filename: string = '/tmp/stats.log', interval: number = 30, options: MonitorOptions = {}): Promise<void> {
         const opts = options ?? {};
@@ -188,13 +190,13 @@ export class ProcessStatsSampler {
 }
 
 /**
- * 便捷函数别名，用法与 ShellTools.monitor 一致：
+ * Convenience function alias with the same signature as ShellTools.monitor:
  * monitor('/tmp/stats.log', 30)
  */
 export const monitor = ProcessStatsSampler.monitor;
 
 /**
- * 便捷函数别名，用法与 ShellTools.lag 一致：
+ * Convenience function alias with the same signature as ShellTools.lag:
  * const delay = await lag(1000)
  */
 export const lag = ProcessStatsSampler.lag;
