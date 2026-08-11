@@ -6,6 +6,9 @@
 
 Samples the Node.js process's memory and CPU usage into a JSON file and measures the Node event-loop execution delay. `sample()` takes one snapshot; call it on your own schedule (e.g. with `setInterval`) to build a time series.
 
+This library is maintained primarily for personal use, so compatibility
+guarantees are pragmatic rather than semver-strict.
+
 ## Install
 
 ```bash
@@ -103,6 +106,10 @@ Example output:
 - `user` / `system` are numbers instead of fixed-point strings.
 - The default output path is `/tmp/stats.json` (was `/tmp/stats.log`).
 - A native ESM entry point (`import`) is now provided alongside `require`.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ## Development
 
