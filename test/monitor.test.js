@@ -25,14 +25,31 @@ test('monitor writes memory and CPU fields', async () => {
     assert.equal(typeof stats.heapUsed, 'number');
     assert.equal(typeof stats.external, 'number');
     assert.equal(typeof stats.arrayBuffers, 'number');
-    assert.equal(typeof stats.user, 'string');
-    assert.equal(typeof stats.system, 'string');
+    assert.equal(typeof stats.user, 'number');
+    assert.equal(typeof stats.system, 'number');
+    assert.ok(Number.isFinite(stats.user));
+    assert.ok(Number.isFinite(stats.system));
+    assert.ok(stats.user >= 0);
+    assert.ok(stats.system >= 0);
     assert.equal(typeof stats.lag, 'number');
     assert.ok(stats.lag >= 0, 'lag is a non-negative number');
     assert.equal(typeof stats.timestamp, 'number');
     assert.ok(stats.timestamp > 0, 'timestamp is a positive epoch ms value');
 
     await fsp.unlink(monitorFile).catch(() => undefined);
+});
+
+test('sample is exported and writes the same schema as monitor', async () => {
+    const {sample} = require('../dist/index.js');
+    const sampleFile = path.join(os.tmpdir(), `process-stats-sampler-sample-${Date.now()}.json`);
+
+    await sample(sampleFile, 0.001);
+
+    const stats = JSON.parse(await fsp.readFile(sampleFile, 'utf8'));
+    assert.equal(typeof stats.rss, 'number');
+    assert.equal(typeof stats.user, 'number');
+    assert.ok(Number.isFinite(stats.user));
+    await fsp.unlink(sampleFile).catch(() => undefined);
 });
 
 test('monitor lag: false writes lag as 0 and skips the probe', async () => {
@@ -138,9 +155,9 @@ test('monitor supports percent and machine-percent units with finite output', as
         const monitorFile = path.join(os.tmpdir(), `process-stats-sampler-${unit}-${Date.now()}.json`);
         await ProcessStatsSampler.monitor(monitorFile, 0.001, {unit});
         const stats = JSON.parse(await fsp.readFile(monitorFile, 'utf8'));
-        assert.match(stats.user, /^-?\d+\.\d{2}$/, `${unit} user is a two-decimal string`);
-        assert.ok(Number.isFinite(Number(stats.user)), `${unit} user is a finite value`);
-        assert.ok(Number.isFinite(Number(stats.system)), `${unit} system is a finite value`);
+        assert.equal(typeof stats.user, 'number', `${unit} user is a number`);
+        assert.ok(Number.isFinite(stats.user), `${unit} user is a finite value`);
+        assert.ok(Number.isFinite(stats.system), `${unit} system is a finite value`);
         await fsp.unlink(monitorFile).catch(() => undefined);
     }
 });
@@ -165,8 +182,37 @@ test('monitor serializes concurrent calls and leaves no tmp files', async () => 
     await fsp.rm(dir, {recursive: true, force: true});
 });
 
+test('independent files keep isolated CPU baselines', async () => {
+    const dir = path.join(os.tmpdir(), `process-stats-sampler-isolated-${Date.now()}`);
+    const f1 = path.join(dir, 'a.json');
+    const f2 = path.join(dir, 'b.json');
+
+    await ProcessStatsSampler.monitor(f1, 0.001);
+    await ProcessStatsSampler.monitor(f2, 0.001);
+    const second = JSON.parse(await fsp.readFile(f2, 'utf8'));
+    await ProcessStatsSampler.monitor(f1, 0.001);
+    const firstAgain = JSON.parse(await fsp.readFile(f1, 'utf8'));
+
+    assert.equal(typeof second.user, 'number');
+    assert.ok(Number.isFinite(second.user), 'f2 CPU is finite on its first sample');
+    assert.equal(typeof firstAgain.user, 'number');
+    assert.ok(Number.isFinite(firstAgain.user), 'f1 CPU is finite after f2 sampled in between');
+
+    await fsp.rm(dir, {recursive: true, force: true});
+});
+
 test('logger without warn falls back to console without throwing', async () => {
     await assert.doesNotReject(() => ProcessStatsSampler.monitor('/nonexistent-root-dir/x.json', 0.001, {logger: {}}));
+});
+
+test('onError is called with the error when sampling fails', async () => {
+    const errors = [];
+    await ProcessStatsSampler.monitor('/nonexistent-root-dir/x.json', 0.001, {
+        onError: (error) => errors.push(error),
+    });
+
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0] instanceof Error);
 });
 
 test('lag rejects invalid ms', async () => {
