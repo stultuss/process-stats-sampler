@@ -1,6 +1,6 @@
 {
   "name": "process-stats-sampler",
-  "version": "2.0.0",
+  "version": "1.1.0",
   "author": "stultuss",
   "description": "Sample Node.js process memory and CPU usage to a JSON file",
   "homepage": "https://github.com/stultuss/process-stats-sampler#readme",
