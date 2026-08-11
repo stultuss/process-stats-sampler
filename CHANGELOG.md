@@ -17,6 +17,8 @@ follow release cadence rather than strict semantic versioning.
   instance and one set of sampling baselines (no dual-package state split).
 - Regression tests for the real-elapsed CPU rate, per-file baseline isolation,
   `reset()`, deterministic write-failure rejection, and ESM/CJS state sharing.
+- Unit tests for the cgroup quota/cpuset parsing logic, extracted as pure
+  functions so they are verifiable without a container.
 
 ### Changed
 

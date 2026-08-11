@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import * as os from 'node:os';
 import {performance} from 'node:perf_hooks';
+import {getCpuCount} from './cgroup';
 
 /** Maximum delay allowed by Node timers (~24.8 days); beyond this setTimeout fires immediately */
 const MAX_TIMER_DELAY = 2_147_483_647;
@@ -64,80 +64,6 @@ function getStream(filename: string): StreamState {
         streams.set(key, state);
     }
     return state;
-}
-
-/** Count CPUs listed in a cpuset value like "0-3,5" or "0,2". */
-function countCpuset(cpus: string): number | undefined {
-    if (cpus.length === 0) {
-        return undefined;
-    }
-    let count = 0;
-    for (const part of cpus.split(',')) {
-        const [startStr, endStr] = part.split('-');
-        const start = Number(startStr);
-        const end = endStr === undefined ? start : Number(endStr);
-        if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
-            return undefined;
-        }
-        count += end - start + 1;
-    }
-    return count;
-}
-
-/**
- * Number of CPU cores effectively available to the process.
- *
- * On Linux this reads the cgroup CPU quota (v2 cpu.max / v1 cfs quota) and the
- * cpuset, and returns the binding constraint. Fractional quotas (e.g. 0.5 core
- * in Kubernetes) are preserved instead of being rounded away. Re-read on every
- * call so runtime changes (docker update, HPA) are picked up.
- */
-function getCpuCount(): number {
-    const hostCores = os.cpus().length;
-    if (process.platform !== 'linux') {
-        return hostCores;
-    }
-
-    let quotaCores: number | undefined;
-    try {
-        // cgroup v2: /sys/fs/cgroup/cpu.max contains "quota period" (quota may be "max")
-        const [quotaStr, periodStr] = fs.readFileSync('/sys/fs/cgroup/cpu.max', 'utf8').trim().split(/\s+/);
-        const quota = Number(quotaStr);
-        const period = Number(periodStr);
-        if (quota > 0 && period > 0) {
-            quotaCores = quota / period;
-        }
-    } catch {
-        // not cgroup v2; try v1 below
-    }
-    if (quotaCores === undefined) {
-        try {
-            const quota = Number(fs.readFileSync('/sys/fs/cgroup/cpu/cpu.cfs_quota_us', 'utf8').trim());
-            if (quota > 0) {
-                const period = Number(fs.readFileSync('/sys/fs/cgroup/cpu/cpu.cfs_period_us', 'utf8').trim());
-                if (period > 0) {
-                    quotaCores = quota / period;
-                }
-            }
-        } catch {
-            // no quota; fall through to cpuset
-        }
-    }
-
-    let cpusetCores: number | undefined;
-    for (const file of ['/sys/fs/cgroup/cpuset.cpus.effective', '/sys/fs/cgroup/cpuset/cpuset.cpus']) {
-        try {
-            cpusetCores = countCpuset(fs.readFileSync(file, 'utf8').trim());
-            if (cpusetCores !== undefined) {
-                break;
-            }
-        } catch {
-            // try the next cpuset file
-        }
-    }
-
-    const limits = [quotaCores, cpusetCores, hostCores].filter((n): n is number => n !== undefined && n > 0);
-    return limits.length > 0 ? Math.min(...limits) : hostCores;
 }
 
 /** Normalize the lag option to a probe duration in ms: false -> 0 (no probe), true -> default */
