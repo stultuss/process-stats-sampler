@@ -5,6 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This package is maintained primarily for personal use, so version numbers
 follow release cadence rather than strict semantic versioning.
 
+## [1.1.3] - 2026-08-13
+
+### Fixed
+
+- The published npm tarball now includes the internal `cgroup` module
+  (`dist/cgroup.js` and its type/map files). `dist/index.js` requires it at
+  module load, so the previous whitelist (public entry files only) made every
+  installed copy fail with `Cannot find module './cgroup'`.
+
 ## [1.1.1] - 2026-08-11
 
 ### Added
